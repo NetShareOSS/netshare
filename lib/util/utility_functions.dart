@@ -2,6 +2,7 @@ import 'dart:io';
 
 import 'package:dartz/dartz.dart';
 import 'package:device_info_plus/device_info_plus.dart';
+import 'package:file_saver_ffi/file_saver_ffi.dart';
 import 'package:network_info_plus/network_info_plus.dart';
 import 'package:permission_handler/permission_handler.dart';
 import 'package:share_plus/share_plus.dart';
@@ -169,5 +170,14 @@ class UtilityFunctions {
       error('port is not an integer');
     }
     return Tuple2(ip, intPort!);
+  }
+
+    static Future<bool> isFileExists(String? filePath) async {
+    if (filePath == null || filePath.isEmpty) return false;
+
+    final uri = Uri.tryParse(filePath);
+    if (uri == null) return false;
+
+    return await FileSaver.canOpenFile(uri);
   }
 }

@@ -1,15 +1,15 @@
-import 'dart:io';
-
+import 'package:file_saver_ffi/file_saver_ffi.dart';
 import 'package:flutter/material.dart';
 import 'package:netshare/di/di.dart';
 import 'package:netshare/entity/shared_file_entity.dart';
 import 'package:netshare/entity/shared_file_state.dart';
+import 'package:netshare/provider/file_provider.dart';
 import 'package:netshare/service/download_service.dart';
 import 'package:netshare/ui/common_view/conditional_parent_widget.dart';
 import 'package:netshare/ui/list_file/file_menu_options.dart';
 import 'package:netshare/util/extension.dart';
 import 'package:netshare/util/utility_functions.dart';
-import 'package:open_filex/open_filex.dart';
+import 'package:provider/provider.dart';
 
 class FileTileClient extends StatefulWidget {
   final SharedFile sharedFile;
@@ -30,7 +30,6 @@ class FileTileClient extends StatefulWidget {
 }
 
 class _FileTileClientState extends State<FileTileClient> {
-
   final hoveringState = ValueNotifier<bool>(false);
 
   @override
@@ -47,9 +46,9 @@ class _FileTileClientState extends State<FileTileClient> {
           }
           return;
         }
-        final file = File('${widget.sharedFile.savedDir}/${widget.sharedFile.name}');
-        if(file.existsSync()) {
-          OpenFilex.open(file.path);
+        if(await UtilityFunctions.isFileExists(widget.sharedFile.savedDir)) {
+          final uri = Uri.parse(widget.sharedFile.savedDir!);
+          FileSaver.openFile(uri);
         } else {
           context.showSnackbar('File does not exist. Please download it first!');
         }
@@ -125,11 +124,22 @@ class _FileTileClientState extends State<FileTileClient> {
         return const Icon(Icons.check_circle, color: Colors.green, size: 16.0);
       case SharedFileState.downloading:
       case SharedFileState.uploading:
-        return const SizedBox(
-            width: 12.0,
-            height: 12.0,
-            child: CircularProgressIndicator(strokeWidth: 2.0),
-          );
+        return SizedBox(
+          width: 12.0,
+          height: 12.0,
+          child: Selector<FileProvider, double>(
+            shouldRebuild: (previous, next) => previous != next,
+            selector: (context, provider) {
+              return provider.getProgress(widget.sharedFile.name ?? '');
+            },
+            builder: (context, progress, child) {
+              return CircularProgressIndicator(
+                strokeWidth: 2.0,
+                value: progress > 0 ? progress : null,
+              );
+            },
+          ),
+        );
       default:
         return const SizedBox.shrink();
     }

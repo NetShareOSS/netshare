@@ -1,5 +1,3 @@
-import 'dart:io';
-
 import 'package:dartz/dartz.dart';
 import 'package:netshare/data/api_service.dart';
 import 'package:netshare/data/global_scope_data.dart';
@@ -7,6 +5,7 @@ import 'package:netshare/data/hivedb/clients/shared_file_client.dart';
 import 'package:netshare/di/di.dart';
 import 'package:netshare/entity/api_error.dart';
 import 'package:netshare/entity/shared_file_entity.dart';
+import 'package:netshare/util/utility_functions.dart';
 
 class FileRepository {
   final ApiService apiService;
@@ -33,10 +32,7 @@ class FileRepository {
         return file.copyWith(url: '$connectedAddress/${file.name}');
       }
 
-      // check exist in device storage
-      final savedFile = File('${savedAvailableFile.savedDir}/${savedAvailableFile.name!}');
-      final isFileExisting = await savedFile.exists();
-      return isFileExisting
+      return await UtilityFunctions.isFileExists(savedAvailableFile.savedDir)
           ? savedAvailableFile.copyWith(url: '$connectedAddress/${file.name}')
           : file.copyWith(url: '$connectedAddress/${file.name}');
     }));

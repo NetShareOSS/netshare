@@ -6,6 +6,10 @@ class FileProvider extends ChangeNotifier {
   final List<SharedFile> _files = [];
   List<SharedFile> get files => _files;
 
+  final Map<String, double> _progressMap = {};
+
+  double getProgress(String fileName) => _progressMap[fileName] ?? 0.0;
+
   void addSharedFile({required SharedFile sharedFile}) {
     _files.add(sharedFile);
     notifyListeners();
@@ -21,6 +25,7 @@ class FileProvider extends ChangeNotifier {
 
   void clearAllFiles() {
     _files.clear();
+    _progressMap.clear();
     notifyListeners();
   }
 
@@ -28,12 +33,18 @@ class FileProvider extends ChangeNotifier {
     required String fileName,
     required SharedFileState newFileState,
     required String savedDir,
+    double? progress,
   }) {
     if(_files.isEmpty) return;
     final oldFile = _files.firstWhere((file) => fileName.trim() == file.name?.trim());
     final oldIndex = _files.indexOf(oldFile);
     final updatedFile = oldFile.copyWith(state: newFileState, savedDir: savedDir);
     _files[oldIndex] = updatedFile;
+    if (progress != null) {
+      _progressMap[fileName] = progress;
+    } else {
+      _progressMap.remove(fileName);
+    }
     notifyListeners();
   }
 }
