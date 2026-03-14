@@ -1,22 +1,16 @@
 import 'dart:async';
 import 'dart:io';
 
-import 'package:android_path_provider/android_path_provider.dart';
-import 'package:flutter/material.dart';
-import 'package:flutter_downloader/flutter_downloader.dart';
+import 'package:file_saver_ffi/file_saver_ffi.dart';
+import 'package:mime/mime.dart';
 import 'package:netshare/entity/download/download_entity.dart';
-import 'package:netshare/entity/download/download_manner.dart';
 import 'package:netshare/entity/download/download_state.dart';
 import 'package:netshare/entity/internal_error.dart';
-import 'package:netshare/util/utility_functions.dart';
-import 'package:path_provider/path_provider.dart';
 import 'package:path/path.dart' as path;
-import 'package:http/http.dart' as http;
-import 'package:uuid/uuid.dart';
 
 class DownloadService {
-
-  StreamController downloadStreamController = StreamController<DownloadEntity>.broadcast();
+  StreamController downloadStreamController =
+      StreamController<DownloadEntity>.broadcast();
 
   Stream<DownloadEntity> get downloadStream =>
       downloadStreamController.stream as Stream<DownloadEntity>;
@@ -29,148 +23,42 @@ class DownloadService {
     downloadStreamController.sink.add(downloadEntity);
   }
 
-  void startDownloading(String fileUrl, {Function(InternalError)? onError}) async {
-    if (UtilityFunctions.isMobile) {
-      downloadWithFlutterDownloader(fileUrl: fileUrl, onError: onError);
-    } else {
-      downloadWithHttp(fileUrl: fileUrl, onError: onError);
-    }
-  }
+  void startDownloading(String fileUrl, {Function(InternalError)? onError}) {
+    final encodedUrl = Uri.encodeFull(fileUrl);
+    final rawFileName = path.basename(fileUrl);
+    final ext = path.extension(rawFileName).replaceFirst('.', '');
+    final baseName = path.basenameWithoutExtension(rawFileName);
+    final mimeType = lookupMimeType(rawFileName) ?? 'application/octet-stream';
+    final fileType = CustomFileType(ext: ext, mimeType: mimeType);
 
-  // Download file using flutter_downloader plugin.
-  // By default, files will be saved on Download directory on Android and Files on iOS
-  Future<void> downloadWithFlutterDownloader({
-    required String fileUrl,
-    Function(InternalError)? onError,
-  }) async {
-    String? externalStorageDirPath;
-    // fix https://github.com/huynguyennovem/netshare/issues/67:
-    // file name has space > need to encode the uri
-    String encodedFileUrl = Uri.encodeFull(fileUrl);
-    if (Platform.isAndroid) {
-      try {
-        externalStorageDirPath = await AndroidPathProvider.downloadsPath;
-      } catch (err) {
-        onError?.call(InternalError.getAndroidDownloadPathFailed);
-        final directory = await getExternalStorageDirectory();
-        externalStorageDirPath = directory?.path;
-      }
-    } else if (Platform.isIOS) {
-      externalStorageDirPath = (await getApplicationDocumentsDirectory()).absolute.path;
-    }
-    if (null != externalStorageDirPath) {
-      final savedDir = Directory(externalStorageDirPath);
-      if (!savedDir.existsSync()) {
-        await savedDir.create();
-      }
-      final encodedFileName = path.basename(encodedFileUrl);
-      final decodedFileName = Uri.decodeFull(encodedFileName);
-      // use raw file name for beautiful name only (without encoded name)
-      final taskId = await FlutterDownloader.enqueue(
-        url: encodedFileUrl,
-        fileName: decodedFileName,
-        savedDir: savedDir.path,
-        saveInPublicStorage: true,
-      );
+    final initial =
+        DownloadEntity(rawFileName, fileUrl, '', DownloadState.downloading);
+    updateDownloadState(initial);
 
-      // add to stream
-      updateDownloadState(
-        DownloadEntity(
-          taskId ?? decodedFileName,
-          decodedFileName,
-          encodedFileUrl,
-          savedDir.path,
-          DownloadManner.flutterDownloader,
-          DownloadState.downloading,
-        )
-      );
-    }
-  }
-
-  void downloadWithHttp({
-    required String fileUrl,
-    Function(InternalError)? onError,
-  }) async {
-    final destPath = await getDownloadsDirectory();
-    final fileName = path.basename(fileUrl);
-
-    var httpClient = http.Client();
-    var request = http.Request('GET', Uri.parse(fileUrl));
-    var response = httpClient.send(request);
-    if (null == destPath) {
-      onError?.call(InternalError.downloadDestNotExist);
-      return;
-    }
-    final fileDestPath = path.join(destPath.path, fileName);
-    IOSink out = File(fileDestPath).openWrite();
-
-    List<List<int>> chunks = [];
-    int downloaded = 0;
-    final taskId = const Uuid().v1();
-
-    // Update download state only one time, see (1)
-    updateDownloadState(
-        DownloadEntity(
-          taskId,
-          fileName,
-          fileUrl,
-          destPath.path,
-          DownloadManner.http,
-          DownloadState.downloading,
-        )
+    FileSaver.save(
+      input: SaveInput.network(url: encodedUrl),
+      fileName: baseName,
+      fileType: fileType,
+      // for iOS, it will automatically save to app's document directory, so no need to add subDir
+      subDir: Platform.isIOS ?  null : 'NetShare',
+    ).listen(
+      (event) {
+        switch (event) {
+          case SaveProgressUpdate(:final progress):
+            updateDownloadState(initial.copyWith(progress: progress));
+          case SaveProgressComplete(:final uri):
+            updateDownloadState(initial.copyWith(
+              savedDir: uri.toString(),
+              state: DownloadState.succeed,
+            ));
+          case SaveProgressError():
+            updateDownloadState(initial.copyWith(state: DownloadState.failed));
+          default:
+            break;
+        }
+      },
+      onError: (_) =>
+          updateDownloadState(initial.copyWith(state: DownloadState.failed)),
     );
-
-    response.asStream().listen((http.StreamedResponse res) async {
-      final contentLen = res.contentLength;
-      res.stream
-          .map((chunk) {
-            if (null != contentLen) {
-              final percent = (downloaded * 1.0 / contentLen) * 100;
-              debugPrint('Downloading percentage: ${percent.roundToDouble()}%');
-            }
-            chunks.add(chunk);
-            downloaded += chunk.length;
-
-            // temporary comment out this until use it for download progressing usage (1)
-            // (displaying download percentage for eg)
-            // updateDownloadState(DownloadEntity(
-            //     taskId, fileName, fileUrl, DownloadManner.http, DownloadState.downloading));
-
-            return chunk;
-          })
-          .pipe(out)
-          .whenComplete(() async {
-            if (null != contentLen) {
-              final percent = (downloaded * 1.0 / contentLen) * 100;
-              debugPrint('Downloading percentage: ${percent.roundToDouble()}%');
-            }
-            debugPrint('Finish downloading file: $fileDestPath');
-            await out.flush();
-            await out.close();
-            downloaded = 0;
-            chunks.clear();
-            updateDownloadState(
-                DownloadEntity(
-                  taskId,
-                  fileName,
-                  fileUrl,
-                  destPath.path,
-                  DownloadManner.http,
-                  DownloadState.succeed,
-                )
-            );
-      }).onError((error, stackTrace) => (error, stackTrace) {
-        updateDownloadState(
-            DownloadEntity(
-              taskId,
-              fileName,
-              fileUrl,
-              destPath.path,
-              DownloadManner.http,
-              DownloadState.failed,
-            )
-        );
-      });
-    });
   }
 }

@@ -1,9 +1,6 @@
 import 'dart:io';
-import 'dart:isolate';
-import 'dart:ui';
 
 import 'package:flutter/material.dart';
-import 'package:flutter_downloader/flutter_downloader.dart';
 import 'package:go_router/go_router.dart';
 import 'package:netshare/config/constants.dart';
 import 'package:netshare/config/styles.dart';
@@ -12,8 +9,6 @@ import 'package:netshare/repository/file_repository.dart';
 import 'package:netshare/service/download_service.dart';
 import 'package:netshare/data/hivedb/clients/shared_file_client.dart';
 import 'package:netshare/entity/connection_status.dart';
-import 'package:netshare/entity/download/download_entity.dart';
-import 'package:netshare/entity/download/download_manner.dart';
 import 'package:netshare/entity/download/download_state.dart';
 import 'package:netshare/entity/shared_file_entity.dart';
 import 'package:netshare/provider/connection_provider.dart';
@@ -36,10 +31,8 @@ class ClientWidget extends StatefulWidget {
   State<ClientWidget> createState() => _ClientWidgetState();
 }
 
-@pragma("vm:entry-point")
 class _ClientWidgetState extends State<ClientWidget> {
 
-  final ReceivePort _port = ReceivePort();
   final fileRepository = getIt.get<FileRepository>();
 
   late TwoModeSwitcher _twoModeSwitcher;
@@ -56,53 +49,8 @@ class _ClientWidgetState extends State<ClientWidget> {
         context.read<AppProvider>().updateAppMode(appMode: FunctionMode.client);
       }
     });
-    _initDownloadModule();
     _downloadStreamListener();
     _initSwitcher();
-  }
-
-  void _initDownloadModule() {
-    if (UtilityFunctions.isMobile) {
-      try {
-        IsolateNameServer.registerPortWithName(_port.sendPort, 'downloader_send_port');
-        _port.listen((dynamic data) async {
-
-          // TODO: 2. Flutter engine issue: can only send basic dart type
-          // convert int to a custom state
-          DownloadState state = (data[1] as int).toDownloadState;
-
-          // only update state when finished, less update, less memory usage
-          if(DownloadState.downloading != state) {
-            String taskId = data[0];
-            final tasks = await FlutterDownloader.loadTasksWithRawQuery(
-              query: "SELECT * FROM task WHERE task_id = \"$taskId\"",
-            );
-            String? fileName;
-            String? url;
-            String? savedDir;
-            if (null != tasks && tasks.isNotEmpty) {
-              final task = tasks.firstWhere((element) => taskId == element.taskId);
-              fileName = task.filename;
-              url = task.url;
-              savedDir = task.savedDir;
-              getIt.get<DownloadService>().updateDownloadState(
-                  DownloadEntity(
-                    taskId,
-                    fileName ?? '',
-                    url,
-                    savedDir,
-                    DownloadManner.flutterDownloader,
-                    state,
-                  )
-              );
-            }
-          }
-        });
-        FlutterDownloader.registerCallback(downloadCallback);
-      } catch (e) {
-        debugPrint(e.toString());
-      }
-    }
   }
 
   void _downloadStreamListener() {
@@ -115,6 +63,9 @@ class _ClientWidgetState extends State<ClientWidget> {
           fileName: downloadEntity.fileName,
           newFileState: downloadEntity.state.toSharedFileState,
           savedDir: downloadEntity.savedDir,
+          progress: downloadEntity.state == DownloadState.downloading
+              ? downloadEntity.progress
+              : null,
         );
       }
 
@@ -153,27 +104,8 @@ class _ClientWidgetState extends State<ClientWidget> {
     );
   }
 
-  @pragma('vm:entry-point')
-  static void downloadCallback(
-    String id,
-    int status,
-    int progress,
-  ) {
-    debugPrint(
-      'Callback on background isolate: '
-      'task ($id) is in status ($status) and process ($progress)',
-    );
-    // TODO: 1. Flutter engine issue: can only send basic dart type + restart/hot reload does not work
-    //  (https://github.com/flutter/flutter/issues/119589)
-    //  can only send basic dart type -> Fix: convert status entity to int
-    IsolateNameServer.lookupPortByName('downloader_send_port')?.send([id, status, progress]);
-  }
-
   @override
   void dispose() {
-    if (UtilityFunctions.isMobile) {
-      IsolateNameServer.removePortNameMapping('downloader_send_port');
-    }
     debugPrint('Disconnected Client!');
     super.dispose();
   }

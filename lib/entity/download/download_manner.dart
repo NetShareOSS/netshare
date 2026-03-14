@@ -1,4 +1,0 @@
-enum DownloadManner {
-  flutterDownloader,
-  http
-}
