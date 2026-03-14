@@ -46,6 +46,8 @@ class _ServerWidgetState extends State<ServerWidget> {
   final ValueNotifier<Directory> _pickedDir = ValueNotifier(Directory('/'));
 
   final ValueNotifier<bool> _isHostingNotifier = ValueNotifier(false);
+  final ValueNotifier<double> _incomingUploadProgress = ValueNotifier(0.0);
+  final ValueNotifier<bool> _incomingUploadVisible = ValueNotifier(false);
   final ValueNotifier<HttpServer?> _serverNotifier = ValueNotifier(null);
   final _loggerController = TextEditingController();
   final ScrollController _loggerScrollBarController = ScrollController();
@@ -57,6 +59,7 @@ class _ServerWidgetState extends State<ServerWidget> {
   late TwoModeSwitcher _twoModeSwitcher;
   final GlobalKey<TwoModeSwitcherState> _twoModeSwitcherKey =
       GlobalKey<TwoModeSwitcherState>();
+  int _lastIncomingLoggedPercent = -1;
 
   @override
   void initState() {
@@ -168,6 +171,8 @@ class _ServerWidgetState extends State<ServerWidget> {
                   ),
                   const SizedBox(height: 28.0),
                   _buildStartHostingButton(isServerStarted),
+                  const SizedBox(height: 16.0),
+                  _buildIncomingUploadProgress(isServerStarted),
                   const SizedBox(height: 28.0),
                   Expanded(
                     child: _buildLogOutput(isServerStarted),
@@ -242,12 +247,14 @@ class _ServerWidgetState extends State<ServerWidget> {
                   hintStyle: const TextStyle(color: Colors.black26),
                   enabledBorder: OutlineInputBorder(
                     borderSide: BorderSide(
-                        color: Colors.black12.withOpacity(0.2), width: 1.2),
+                        color: Colors.black12.withValues(alpha: 0.2),
+                        width: 1.2),
                     borderRadius: const BorderRadius.all(Radius.circular(8.0)),
                   ),
                   border: OutlineInputBorder(
                     borderSide: BorderSide(
-                        color: Colors.black12.withOpacity(0.2), width: 1.2),
+                        color: Colors.black12.withValues(alpha: 0.2),
+                        width: 1.2),
                     borderRadius: const BorderRadius.all(Radius.circular(8.0)),
                   ),
                   filled: true,
@@ -286,7 +293,7 @@ class _ServerWidgetState extends State<ServerWidget> {
                       color: Theme.of(context)
                           .colorScheme
                           .surface
-                          .withOpacity(0.8),
+                          .withValues(alpha: 0.8),
                       shape: RoundedRectangleBorder(
                         borderRadius: BorderRadius.circular(8.0),
                       ),
@@ -351,6 +358,51 @@ class _ServerWidgetState extends State<ServerWidget> {
           );
         },
       );
+
+  Widget _buildIncomingUploadProgress(bool isServerStarted) {
+    return ValueListenableBuilder<bool>(
+      valueListenable: _incomingUploadVisible,
+      builder: (context, isVisible, child) {
+        if (!isServerStarted || !isVisible) {
+          return const SizedBox.shrink();
+        }
+        return ValueListenableBuilder<double>(
+          valueListenable: _incomingUploadProgress,
+          builder: (context, progress, child) {
+            final safeProgress = progress.clamp(0.0, 1.0);
+            final percent = (safeProgress * 100).round();
+            return Container(
+              width: double.maxFinite,
+              padding: const EdgeInsets.all(12.0),
+              decoration: BoxDecoration(
+                color: textFieldBackgroundColor,
+                borderRadius: BorderRadius.circular(8.0),
+              ),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  ClipRRect(
+                    borderRadius: BorderRadius.circular(8.0),
+                    child: LinearProgressIndicator(
+                      value: safeProgress,
+                      minHeight: 12.0,
+                      backgroundColor: Colors.black12,
+                    ),
+                  ),
+                  const SizedBox(height: 8.0),
+                  Text(
+                    'Incoming upload: $percent%',
+                    style: CommonTextStyle.textStyleNormal
+                        .copyWith(fontSize: 14.0),
+                  ),
+                ],
+              ),
+            );
+          },
+        );
+      },
+    );
+  }
 
   _onClickSelectDirPath() async {
     try {
@@ -436,6 +488,8 @@ class _ServerWidgetState extends State<ServerWidget> {
         .addHandler(cascade.handler);
 
     _isHostingNotifier.value = !_isHostingNotifier.value;
+    _incomingUploadProgress.value = 0.0;
+    _lastIncomingLoggedPercent = -1;
 
     try {
       _serverNotifier.value =
@@ -525,10 +579,17 @@ class _ServerWidgetState extends State<ServerWidget> {
   // }
 
   Future<Response> _uploadFileHandler(Request request, String address) async {
+    _incomingUploadVisible.value = true;
+    _incomingUploadProgress.value = 0.0;
+    _lastIncomingLoggedPercent = -1;
+    _exposeLogger(message: 'Incoming upload started');
     final contentType = MediaType.parse(request.headers['Content-Type'] ?? '');
     final transformer =
         MimeMultipartTransformer(contentType.parameters["boundary"] ?? '');
     final parts = transformer.bind(request.read());
+    final totalUploadBytes =
+        int.tryParse(request.headers['x-upload-total-bytes'] ?? '') ?? -1;
+    int receivedBytes = 0;
     try {
       List<String> listFileName = [];
       await for (final part in parts) {
@@ -578,7 +639,14 @@ class _ServerWidgetState extends State<ServerWidget> {
             continue;
           }
 
-          await sink.addStream(content);
+          await for (List<int> item in content) {
+            sink.add(item);
+            receivedBytes += item.length;
+            _updateIncomingUploadProgress(
+              receivedBytes: receivedBytes,
+              totalBytes: totalUploadBytes,
+            );
+          }
           await sink.flush();
           await sink.close();
           await sink.result;
@@ -591,6 +659,11 @@ class _ServerWidgetState extends State<ServerWidget> {
 
         listFileName.add(resolvedFileName);
       }
+
+      _updateIncomingUploadProgress(
+        receivedBytes: totalUploadBytes,
+        totalBytes: totalUploadBytes,
+      );
 
       // Show dialog for new files.
       if (listFileName.isNotEmpty && mounted) {
@@ -610,6 +683,8 @@ class _ServerWidgetState extends State<ServerWidget> {
     } catch (e) {
       debugPrint(e.toString());
       return Response(HttpStatus.badRequest);
+    } finally {
+      _incomingUploadVisible.value = false;
     }
   }
 
@@ -622,6 +697,27 @@ class _ServerWidgetState extends State<ServerWidget> {
   _exposeLogger({required String message}) {
     debugPrint('[ServerWidget] $message');
     _logBuffer.appendLog(message: message);
+  }
+
+  void _updateIncomingUploadProgress({
+    required int receivedBytes,
+    required int totalBytes,
+  }) {
+    if (totalBytes <= 0) {
+      return;
+    }
+    final progress = (receivedBytes / totalBytes).clamp(0.0, 1.0);
+    _incomingUploadProgress.value = progress;
+
+    final percent = (progress * 100).round();
+    final shouldLog = percent == 100 ||
+        percent == 0 ||
+        _lastIncomingLoggedPercent == -1 ||
+        (percent - _lastIncomingLoggedPercent >= 5);
+    if (shouldLog && percent != _lastIncomingLoggedPercent) {
+      _lastIncomingLoggedPercent = percent;
+      _exposeLogger(message: 'Incoming upload: $percent%');
+    }
   }
 
   _disposeAllThings() {
@@ -637,6 +733,8 @@ class _ServerWidgetState extends State<ServerWidget> {
     _logBuffer.dispose();
 
     _isHostingNotifier.dispose();
+    _incomingUploadProgress.dispose();
+    _incomingUploadVisible.dispose();
     _serverNotifier.dispose();
 
     _watchTimerValue.dispose();
