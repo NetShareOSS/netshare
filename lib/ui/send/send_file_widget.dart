@@ -41,12 +41,15 @@ class _SendFilesWidgetState extends State<SendFilesWidget> {
   }
 
   final ValueNotifier<bool> _isUploading = ValueNotifier(false);
+  final ValueNotifier<double> _uploadProgress = ValueNotifier(0.0);
   final ValueNotifier<bool> _draggingNotifier = ValueNotifier<bool>(false);
+  int _lastLoggedUploadPercent = -1;
 
   @override
   void dispose() {
     super.dispose();
     _isUploading.dispose();
+    _uploadProgress.dispose();
     _draggingNotifier.dispose();
   }
 
@@ -79,6 +82,7 @@ class _SendFilesWidgetState extends State<SendFilesWidget> {
           children: [
             _filePickerButton(),
             Expanded(child: _mainListFiles()),
+            _buildUploadProgressWidget(),
             _buttonUpload(),
           ],
         ),
@@ -94,6 +98,7 @@ class _SendFilesWidgetState extends State<SendFilesWidget> {
               ],
             ),
           ),
+          _buildUploadProgressWidget(),
           _buttonUpload(),
         ],
       );
@@ -236,37 +241,89 @@ class _SendFilesWidgetState extends State<SendFilesWidget> {
 
   _buttonUpload() => Container(
         margin: const EdgeInsets.only(bottom: 16.0),
-        child: FloatingActionButton.extended(
-          onPressed: () {
-            if (_pickedFiles.isNotEmpty) {
-              _startUploading(context, _pickedFiles);
-            }
+        child: ValueListenableBuilder<bool>(
+          valueListenable: _isUploading,
+          builder: (context, isUploading, child) {
+            return FloatingActionButton.extended(
+              onPressed: isUploading
+                  ? null
+                  : () {
+                      if (_pickedFiles.isNotEmpty) {
+                        _startUploading(_pickedFiles);
+                      }
+                    },
+              label: Row(
+                children: [
+                  Text(
+                    'Send files',
+                    style: CommonTextStyle.textStyleNormal.copyWith(
+                      fontSize: 14.0,
+                      color: textIconButtonColor,
+                    ),
+                  ),
+                  const SizedBox(width: 8.0),
+                  isUploading
+                      ? const SizedBox(
+                          width: 16.0,
+                          height: 16.0,
+                          child: CircularProgressIndicator(strokeWidth: 2.0),
+                        )
+                      : const SizedBox.shrink(),
+                ],
+              ),
+              icon: const Icon(Icons.upload, color: textIconButtonColor),
+            );
           },
-          label: Row(
-            children: [
-              Text(
-                'Send files',
-                style: CommonTextStyle.textStyleNormal.copyWith(
-                  fontSize: 14.0,
-                  color: textIconButtonColor,
-                ),
-              ),
-              const SizedBox(width: 8.0),
-              ValueListenableBuilder(
-                valueListenable: _isUploading,
-                builder: (context, value, child) => value
-                    ? const SizedBox(
-                        width: 16.0,
-                        height: 16.0,
-                        child: CircularProgressIndicator(strokeWidth: 2.0),
-                      )
-                    : const SizedBox.shrink(),
-              ),
-            ],
-          ),
-          icon: const Icon(Icons.upload, color: textIconButtonColor),
         ),
       );
+
+  Widget _buildUploadProgressWidget() {
+    return ValueListenableBuilder<bool>(
+      valueListenable: _isUploading,
+      builder: (context, isUploading, child) {
+        if (!isUploading) {
+          return const SizedBox.shrink();
+        }
+        return ValueListenableBuilder<double>(
+          valueListenable: _uploadProgress,
+          builder: (context, progress, child) {
+            final safeProgress = progress.clamp(0.0, 1.0);
+            final percent = (safeProgress * 100).round();
+            return Container(
+              width: double.maxFinite,
+              margin:
+                  const EdgeInsets.only(left: 16.0, right: 16.0, bottom: 12.0),
+              padding: const EdgeInsets.all(12.0),
+              decoration: BoxDecoration(
+                color: textFieldBackgroundColor,
+                borderRadius: BorderRadius.circular(8.0),
+              ),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  ClipRRect(
+                    borderRadius: BorderRadius.circular(8.0),
+                    child: LinearProgressIndicator(
+                      value: safeProgress,
+                      minHeight: 12.0,
+                      backgroundColor: Colors.black12,
+                    ),
+                  ),
+                  const SizedBox(height: 8.0),
+                  Text(
+                    'Uploading: $percent%',
+                    style: CommonTextStyle.textStyleNormal.copyWith(
+                      fontSize: 14.0,
+                    ),
+                  ),
+                ],
+              ),
+            );
+          },
+        );
+      },
+    );
+  }
 
   void _pickFile() async {
     if (Platform.isIOS) {
@@ -334,26 +391,46 @@ class _SendFilesWidgetState extends State<SendFilesWidget> {
     }
   }
 
-  void _startUploading(BuildContext context, List<FileUpload> files) async {
+  void _startUploading(List<FileUpload> files) async {
     setUploadState(uploading: true);
+    _uploadProgress.value = 0.0;
+    _lastLoggedUploadPercent = -1;
+    debugPrint('[SendFilesWidget] Upload started');
 
-    final result = await getIt<ApiService>().uploadFile(files: files);
-    result.fold(
-      (l) {
-        context.showSnackbar('Failed to upload');
-      },
-      (r) {
-        context.showSnackbar('Upload successful');
-        context
-            .read<FileProvider>()
-            .addAllSharedFiles(sharedFiles: r.toSet(), isAppending: true);
+    try {
+      final result = await getIt<ApiService>().uploadFile(
+        files: files,
+        onProgress: (progress) {
+          final safeProgress = progress.clamp(0.0, 1.0);
+          _uploadProgress.value = safeProgress;
+          final percent = (safeProgress * 100).round();
+          if (percent != _lastLoggedUploadPercent) {
+            _lastLoggedUploadPercent = percent;
+            debugPrint('[SendFilesWidget] Uploading: $percent%');
+          }
+        },
+      );
+      if (!mounted) return;
+      result.fold(
+        (l) {
+          context.showSnackbar('Failed to upload');
+        },
+        (r) {
+          _uploadProgress.value = 1.0;
+          context.showSnackbar('Upload successful');
+          context
+              .read<FileProvider>()
+              .addAllSharedFiles(sharedFiles: r.toSet(), isAppending: true);
 
-        Future.delayed(
-            const Duration(seconds: 1), () => Navigator.of(context).pop());
-      },
-    );
-
-    setUploadState(uploading: false);
+          Future.delayed(const Duration(seconds: 1), () {
+            if (!mounted) return;
+            Navigator.of(context).pop();
+          });
+        },
+      );
+    } finally {
+      setUploadState(uploading: false);
+    }
   }
 
   void setUploadState({required bool uploading}) {
