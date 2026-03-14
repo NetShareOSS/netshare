@@ -42,39 +42,16 @@
             android:name="flutterEmbedding"
             android:value="2" />
 
-        <!--flutter_downloader-->
+        <!-- File provider for file_saver_ffi
+             This configuration is necessary for file_saver_ffi to be able to open files with the file:// URI -->
         <provider
-            android:name="vn.hunghd.flutterdownloader.DownloadedFileProvider"
-            android:authorities="${applicationId}.flutter_downloader.provider"
+            android:name="androidx.core.content.FileProvider"
+            android:authorities="${applicationId}.file_saver_ffi.fileprovider"
             android:exported="false"
             android:grantUriPermissions="true">
             <meta-data
                 android:name="android.support.FILE_PROVIDER_PATHS"
-                android:resource="@xml/provider_paths"/>
+                android:resource="@xml/file_saver_ffi_file_paths" />
         </provider>
-        <!-- Begin FlutterDownloader customization -->
-        <!-- disable default Initializer -->
-        <provider
-            android:name="androidx.startup.InitializationProvider"
-            android:authorities="${applicationId}.androidx-startup"
-            android:exported="false"
-            tools:node="merge">
-            <meta-data
-                android:name="androidx.work.WorkManagerInitializer"
-                android:value="androidx.startup"
-                tools:node="remove" />
-        </provider>
-        <!-- declare customized Initializer -->
-        <provider
-            android:name="vn.hunghd.flutterdownloader.FlutterDownloaderInitializer"
-            android:authorities="${applicationId}.flutter-downloader-init"
-            android:exported="false">
-            <!-- changes this number to configure the maximum number of concurrent tasks -->
-            <meta-data
-                android:name="vn.hunghd.flutterdownloader.MAX_CONCURRENT_TASKS"
-                android:value="5" />
-        </provider>
-        <!-- End FlutterDownloader customization -->
-
     </application>
 </manifest>
