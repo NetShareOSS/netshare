@@ -3,10 +3,12 @@ import 'dart:convert';
 import 'dart:io';
 
 import 'package:file_picker/file_picker.dart';
+import 'package:file_saver_ffi/file_saver_ffi.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:go_router/go_router.dart';
 import 'package:http_parser/http_parser.dart';
+import 'package:mime/mime.dart';
 import 'package:netshare/config/constants.dart';
 import 'package:netshare/config/styles.dart';
 import 'package:netshare/data/global_scope_data.dart';
@@ -20,9 +22,7 @@ import 'package:netshare/ui/common_view/two_modes_switcher.dart';
 import 'package:netshare/ui/server/qr_popup.dart';
 import 'package:netshare/util/extension.dart';
 import 'package:netshare/util/utility_functions.dart';
-import 'package:mime/mime.dart';
 import 'package:open_dir/open_dir.dart';
-import 'package:open_filex/open_filex.dart';
 import 'package:path/path.dart' as path;
 import 'package:provider/provider.dart';
 import 'package:shelf/shelf.dart';
@@ -534,26 +534,62 @@ class _ServerWidgetState extends State<ServerWidget> {
       await for (final part in parts) {
         final content = part.cast<List<int>>();
 
-        // parse file name from header
-        List<String> pairs =
-            part.headers['content-disposition']?.split(";") ?? [];
-        final fileName = pairs.map((element) {
-          if (element.contains('filename')) {
-            return element.substring(
-                element.indexOf("=") + 2, element.length - 1);
-          }
-          return '';
-        }).firstWhere((element) => element.isNotEmpty);
-        listFileName.add(fileName);
+        // Parse file name from header, then sanitize to prevent path traversal.
+        final contentDisposition = part.headers['content-disposition'] ??
+            part.headers['Content-Disposition'];
+        final rawFileName = (() {
+          final match = RegExp(r'filename="([^"]+)"').firstMatch(
+            contentDisposition ?? '',
+          );
+          return match?.group(1);
+        })();
 
-        // save file to storage
-        final filePath = "${_pickedDir.value.path}/$fileName";
-        IOSink sink = File(filePath).openWrite();
-        await for (List<int> item in content) {
-          sink.add(item);
+        if (rawFileName == null || rawFileName.trim().isEmpty) {
+          continue;
         }
-        await sink.flush();
-        await sink.close();
+
+        final safeFileName = path.basename(rawFileName.trim());
+
+        final baseName = path.basenameWithoutExtension(safeFileName).trim();
+        final ext = path.extension(safeFileName).replaceFirst('.', '').trim();
+
+        final headerMime =
+            part.headers['content-type'] ?? part.headers['Content-Type'];
+        final mimeType = headerMime ??
+            lookupMimeType(safeFileName) ??
+            'application/octet-stream';
+
+        final resolvedBaseName = baseName.isEmpty ? 'file' : baseName;
+        final resolvedExt = ext.isEmpty ? 'bin' : ext;
+        final resolvedFileName =
+            ext.isEmpty ? '$resolvedBaseName.$resolvedExt' : safeFileName;
+
+        // Save file to storage using FileSaver session sink.
+        FileSaverSink? sink;
+        try {
+          sink = await FileSaver.openWrite(
+            fileName: resolvedBaseName,
+            fileType: CustomFileType(ext: resolvedExt, mimeType: mimeType),
+            saveLocation: PathLocation(_pickedDir.value.path),
+            conflictResolution: ConflictResolution.overwrite,
+          );
+
+          if (sink == null) {
+            continue;
+          }
+
+          await sink.addStream(content);
+          await sink.flush();
+          await sink.close();
+          await sink.result;
+        } catch (_) {
+          try {
+            await sink?.cancel();
+          } catch (_) {}
+          rethrow;
+        }
+
+        listFileName.add(resolvedFileName);
       }
 
       // Show dialog for new files.
@@ -681,13 +717,11 @@ class _ServerWidgetState extends State<ServerWidget> {
 
   Future<void> _openFile(String filePath) async {
     try {
-      final result = await OpenFilex.open(filePath);
-      debugPrint('Open file result: ${result.message}');
-      if (result.type != ResultType.done) {
-        if (mounted) {
-          context.showSnackbar('Failed to open file: ${result.message}');
-        }
-      }
+      if (filePath.isEmpty) return;
+
+      final uri = Uri(scheme: "file", path: filePath);
+
+      await FileSaver.openFile(uri);
     } catch (e) {
       debugPrint('Failed to open file: ${e.toString()}');
       if (mounted) {
