@@ -145,21 +145,6 @@ extension SharedFileExt on SharedFile {
   }
 }
 
-extension IntExt on int {
-  DownloadState get toDownloadState {
-    switch (this) {
-      case 2:
-        return DownloadState.downloading;
-      case 3:
-        return DownloadState.succeed;
-      case 4:
-        return DownloadState.failed;
-      default:
-        return DownloadState.none;
-    }
-  }
-}
-
 extension DownloadStateExt on DownloadState {
   SharedFileState get toSharedFileState {
     switch (this) {

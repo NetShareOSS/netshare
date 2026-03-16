@@ -16,6 +16,10 @@ import 'package:netshare/util/utility_functions.dart';
 import 'package:path/path.dart' as path;
 import 'package:provider/provider.dart';
 
+// iOS: let the user choose between Photos/Videos and Files.
+// `file_picker` uses different native pickers depending on the FileType.
+enum _IosPickSource { media, nonMedia }
+
 class SendFilesWidget extends StatefulWidget {
   final List<FileUpload>? initialFiles;
 
@@ -265,25 +269,68 @@ class _SendFilesWidgetState extends State<SendFilesWidget> {
       );
 
   void _pickFile() async {
-    FileType type = FileType.any;
     if (Platform.isIOS) {
-      type = FileType.media;
+      final picked = await showModalBottomSheet<_IosPickSource>(
+        context: context,
+        showDragHandle: true,
+        builder: (context) {
+          return SafeArea(
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                ListTile(
+                  leading: const Icon(Icons.perm_media),
+                  title: const Text('Pick media file'),
+                  onTap: () =>
+                      Navigator.of(context).pop(_IosPickSource.media),
+                ),
+                ListTile(
+                  leading: const Icon(Icons.file_copy_rounded),
+                  title: const Text('Pick non-media file'),
+                  onTap: () =>
+                      Navigator.of(context).pop(_IosPickSource.nonMedia),
+                ),
+              ],
+            ),
+          );
+        },
+      );
+
+      if (!mounted) return;
+      if (picked == null) return;
+
+      if (picked == _IosPickSource.media) {
+        _processPickingFile(FileType.media);
+      } else {
+        _processPickingFile(FileType.any);
+      }
+      return;
     }
-    _processPickingFile(type);
+
+    _processPickingFile(FileType.any);
   }
 
-  void _processPickingFile(type) async {
-    FilePickerResult? result =
-        await FilePicker.platform.pickFiles(allowMultiple: true, type: type);
-    if (result != null) {
-      setState(() {
-        _pickedFiles = _pickedFiles
-          ..addAll(result.paths
-              .where((element) => element != null)
-              .map((e) => FileUpload(e!))
-              .toList());
-        _pickedFiles = _pickedFiles.toSet().toList(); // remove duplicate files
-      });
+  void _processPickingFile(FileType type) async {
+    try {
+      FilePickerResult? result =
+          await FilePicker.platform.pickFiles(allowMultiple: true, type: type);
+      if (!mounted) return;
+      if (result != null) {
+        setState(() {
+          _pickedFiles = _pickedFiles
+            ..addAll(result.paths
+                .where((element) => element != null)
+                .map((e) => FileUpload(e!))
+                .toList());
+          _pickedFiles =
+              _pickedFiles.toSet().toList(); // remove duplicate files
+        });
+      }
+    } catch (e) {
+      debugPrint('[SendFilesWidget] Error picking files: $e');
+      if (!mounted) return;
+      context.showSnackbar(
+          'Failed to open file picker. Please check app permissions.');
     }
   }
 
