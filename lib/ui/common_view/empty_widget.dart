@@ -1,4 +1,4 @@
-import 'package:flutter/material.dart';
+import 'package:material_ui/material_ui.dart';
 import 'package:netshare/config/styles.dart';
 
 class EmptyWidget extends StatelessWidget {

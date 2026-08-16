@@ -1,7 +1,7 @@
 import 'dart:async';
 import 'dart:io';
 
-import 'package:flutter/material.dart';
+import 'package:material_ui/material_ui.dart';
 import 'package:netshare/config/styles.dart';
 import 'package:netshare/data/global_scope_data.dart';
 import 'package:netshare/data/pref_data.dart';

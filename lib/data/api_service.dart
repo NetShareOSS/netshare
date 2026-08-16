@@ -2,7 +2,7 @@ import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 
-import 'package:flutter/cupertino.dart';
+import 'package:cupertino_ui/cupertino_ui.dart';
 import 'package:http/http.dart' as http;
 import 'package:dartz/dartz.dart';
 import 'package:netshare/data/global_scope_data.dart';

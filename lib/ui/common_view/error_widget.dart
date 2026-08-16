@@ -1,4 +1,4 @@
-import 'package:flutter/material.dart';
+import 'package:material_ui/material_ui.dart';
 
 class CustomErrorWidget extends StatelessWidget {
   const CustomErrorWidget({Key? key}) : super(key: key);

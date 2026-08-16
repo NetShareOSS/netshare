@@ -1,4 +1,4 @@
-import 'package:flutter/material.dart';
+import 'package:material_ui/material_ui.dart';
 import 'package:netshare/config/styles.dart';
 import 'package:netshare/entity/shared_file_entity.dart';
 import 'package:netshare/ui/common_view/conditional_parent_widget.dart';

@@ -1,4 +1,4 @@
-import 'package:flutter/material.dart';
+import 'package:material_ui/material_ui.dart';
 import 'package:netshare/config/constants.dart';
 import 'package:netshare/entity/download/download_state.dart';
 import 'package:netshare/entity/file_upload.dart';

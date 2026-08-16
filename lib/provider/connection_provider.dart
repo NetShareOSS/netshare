@@ -1,5 +1,5 @@
 
-import 'package:flutter/cupertino.dart';
+import 'package:cupertino_ui/cupertino_ui.dart';
 import 'package:netshare/data/global_scope_data.dart';
 import 'package:netshare/data/pref_data.dart';
 import 'package:netshare/di/di.dart';

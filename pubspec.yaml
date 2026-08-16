@@ -74,6 +74,8 @@ dependencies:
       ref: getpathdir-crash-1345
   tray_manager: ^0.5.2
   window_manager: ^0.5.1
+  material_ui: 1.0.0
+  cupertino_ui: any
 
 dev_dependencies:
   flutter_test:
